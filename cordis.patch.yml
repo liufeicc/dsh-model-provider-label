@@ -1,0 +1,12 @@
+# 模型选择按钮显示供应商 —— 纯客户端插件。
+#
+# 为什么是 insert 一行空壳：DSH 的 bundle 行是 Host 插件行，本包 Host 侧不做事，
+# 真正的逻辑在 client.js 里注册 conversation.input.model.label 这个 slot。
+# 客户端依赖见 package.json 的 dsh.client.inject（必须声明 model-selection，
+# 否则 slot 的声明方还没加载）。
+#
+# 与 1.0 的区别：1.0 是改 node_modules 里 client.js 的补丁，升级必丢、锚点会漂移；
+# 2.0 用官方 slot，升级不受影响。
+- insert:
+    - id: model-provider-label
+      name: '@local/dsh-model-provider-label'

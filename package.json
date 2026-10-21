@@ -1,0 +1,30 @@
+{
+  "name": "@local/dsh-model-provider-label",
+  "version": "2.0.0",
+  "private": true,
+  "description": "在「当前模型」按钮与菜单里显示供应商名——基于官方 conversation.input.model.label slot，升级不会失效",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-ui-renderer"
+      ]
+    }
+  }
+}

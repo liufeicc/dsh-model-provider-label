@@ -2,6 +2,21 @@
 
 # dsh-model-provider-label —— 让「当前模型」按钮显示供应商
 
+> ## ⚠️ 2.0（2026-10-21）：已从「补丁」改为「slot 插件」
+>
+> DSH 0.2.1 开放了官方扩展点 `conversation.input.model.label`（模型标签的渲染 slot，
+> fallback 只渲染 `model.name`）。本包据此重写：
+>
+> | | 1.0（旧） | 2.0（现在） |
+> |---|---|---|
+> | 实现 | `patch.mjs` 改 `dsh-client-ui-model-selection/lib/client.js` | `client.js` 注册 slot |
+> | 升级后 | **必丢**，且锚点会随版本漂移（0.2.1 实测已失效） | 不受影响 |
+> | 覆盖 | 按钮 + 菜单 + aria | 按钮 + 菜单（aria 保持默认） |
+>
+> **`patch.mjs` 已弃用**，仅作历史参考保留；不要再运行它 —— 它在 0.2.1 上会因锚点
+> 匹配不到而报错。下面「一、解决什么问题」之后的内容仍准确，只是实现方式变了，
+> 阅读时把「补丁」替换成「slot 插件」即可。
+
 ## 一、解决什么问题
 
 DSH 的模型选择器**已经**按供应商分组：展开列表后，每组上方都有供应商名（`MenuGroup` 的组标题，取的是 provider 的 `displayName`）。
