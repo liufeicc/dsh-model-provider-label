@@ -1,108 +1,98 @@
 English | [中文](README.zh-CN.md)
 
-# dsh-model-provider-label —— show the provider in the "current model" button
+# dsh-model-provider-label — show the provider in the "current model" button
 
-## 1. What problem does it solve
+> **2.0 (2026-10-21): rewritten as a slot plugin.** DSH 0.2.1 exposes the
+> `conversation.input.model.label` render slot, so this plugin now registers a
+> renderer instead of patching the compiled `dsh-client-ui-model-selection`
+> bundle. The old `patch.mjs` is deprecated and kept only for historical
+> reference — do not run it against 0.2.1, where its anchors no longer match.
 
-DSH's model selector **already** groups models by provider: once you expand the list, every group has the provider name above it (the `MenuGroup` group title, taken from the provider's `displayName`).
-But **after you select a model**, the button above the input box shows only the model name:
+## 1. The problem
 
+DSH's model selector **already** groups models by provider: once you expand the
+list, every group has the provider name above it (the `MenuGroup` title, taken
+from the provider's display name). But **after you select a model**, the button
+above the input box shows only the model name:
+
+```text
+deepseek-v4.1-flash           ← is this 「阿里云(公司)」 or 「阿里云(个人)」?
 ```
-deepseek-v4.1-flash           ← cannot tell whether this is 「阿里云(公司)」 or 「阿里云(个人)」
-```
 
-When several providers offer a model with the **same name** (in one profile, for example, both `阿里云(公司)` and `阿里云(个人)` are `deepseek-v4.1-flash`,
-and both `llm-deepseek` and `和仁平台` are `deepseek-flash`), however clear the group title is, it does not help — **it disappears as soon as you select something**.
+When several providers offer a model with the **same name** (for example, both
+`阿里云(公司)` and `阿里云(个人)` expose `deepseek-v4.1-flash`, and both
+`llm-deepseek` and `和仁平台` expose `deepseek-flash`), the group title cannot
+help once the selection is made — it is gone.
 
-After applying this patch:
+With this plugin:
 
-```
+```text
 和仁平台 · deepseek-flash · Default
 └─ dimmed ─┘   └─ normal ─┘   └─ effort ┘
 ```
 
-The value of the "Model" row in the menu root panel, and the accessibility reading text (aria), carry the provider as well.
+The value of the "Model" row in the menu root panel carries the provider as
+well.
 
-## 2. What it changes
+## 2. How it works
 
-The target file is the compiled artifact that dsh actually loads (not the source repository):
+The plugin registers a renderer for the official render slot
+`conversation.input.model.label`:
 
-```
-<dsh-install>/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-# for a global npm install, for example: $(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-```
+- `client.js` — registers the renderer through `ctx.slots.inject(...)`, so it
+  mounts only while the plugin that declares the slot
+  (`@deepseek-ai/dsh-client-ui-model-selection`) is active, and rolls back when
+  this plugin unloads.
+- `index.js` — a no-op host entry. A profile bundle row is a host plugin row, so
+  the package must be insertable as a Cordis plugin; all the work happens in the
+  browser.
+- `cordis.patch.yml` — inserts that host row.
+- `package.json` — declares `dsh.bundle` and injects the model-selection client
+  package through `dsh.client.inject`, so the slot provider is loaded first.
 
-The absolute path as resolved on your own machine can be printed with `readlink -f ~/.dsh/profiles/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js`.
+The renderer puts the provider name in a dimmer caption color **before** the
+model name. Because the provider comes first, ellipsis truncation drops the tail
+of the model name first and never swallows the provider. Rows in the expanded
+model list (`placement: "option"`) keep the bare model name: that list is
+already grouped by provider, so repeating the name there would only add noise.
 
-5 changes in total, all anchored on uniquely identifiable code fragments:
+## 3. Install
 
-| # | Location | Change |
-|---|---|---|
-| 1 | before `triggerLabel` | adds `providerLabel` (the display name of the provider the current selection belongs to; `deepseek-account` uses a localized string, consistent with the list group titles) and `modelAriaLabel` |
-| 2 | `triggerLabel` | changed from "model name · effort" to "provider · model name · effort", skipping missing parts automatically |
-| 3 | the button's text JSX | the provider becomes its own segment using `--dsw-alias-label-caption` (dimmer) and is placed **before the model name**, so when the ellipsis truncates the text the tail of the model name is dropped first and the provider is never swallowed |
-| 4 | the value of the "Model" row in the menu root panel | shows the provider as well |
-| 5 | `triggerAria` | the aria reading text carries the provider |
+Requires DSH 0.2.1 or newer (the slot was introduced in 0.2.1).
 
-The patch text contains the `LOCAL-PATCH:provider-label` marker, which the script uses to decide idempotency.
-
-## 3. How to use it
-
-```bash
-cd dsh-model-provider-label   # the directory that contains patch.mjs
-
-node patch.mjs            # apply the patch (skipped if already applied); locates the target file from the profile automatically
-node patch.mjs --check    # show the status only
-node patch.mjs --revert   # revert (strictly the inverse of applying; does not rely on the backup file)
-node patch.mjs --target /path/to/other/lib/client.js   # point at another install location
+```sh
+dsh plugin --profile web add github:liufeicc/dsh-model-provider-label
 ```
 
-- Before patching, an original copy is kept as `client.js.orig-provider-label` (the file name does not end in `.js`,
-  so the client's chunk scanning rule `^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$` does not match it).
-- **No restart is needed** after the change: `dsh-client-hmr` stats the client bundle once every 500ms,
-  and as soon as mtime/ctime/size change it recomputes the rev and pushes it to the browser over SSE for hot reload. Refreshing the page once is the safest.
+Restart the host (`dsh web`) after adding the package. For local development,
+link the directory instead:
 
-## 4. After a dsh upgrade
-
-Upgrading `dsh` overwrites `node_modules`, and the patch is lost with it (back to "model name only"). Run it once more:
-
-```bash
-node patch.mjs
+```sh
+dsh plugin --profile web add link:/path/to/dsh-model-provider-label
 ```
 
-If the upgrade also rewrote this piece of code, the script **exits with an error instead of editing blindly**, for example:
+## 4. Upgrading DSH
 
-```
-锚点「triggerLabel 定义」匹配到 0 处，期望恰好 1 处；DSH 可能已升级并改写了这段代码，请重新核对补丁
-```
+Nothing under `node_modules` is patched, so upgrading `dsh` does not remove the
+plugin. Only a future change to the slot API would require updating `client.js`.
 
-In that case you need to re-check the anchors against the new `client.js` and then update the constants in this script. You can run `node patch.mjs --check` first to confirm the status.
+## 5. History: the 1.0 patch
 
-## 5. How to verify that the patch is really in effect
-
-Besides eyeballing the button, you can ask the server for the bundle it actually sends out
-(the `/plugins/events` SSE endpoint needs no authentication and pushes the complete client module graph):
-
-```bash
-timeout 4 curl -s -N http://127.0.0.1:<port>/plugins/events > /tmp/sse.txt
-# take the rev and url of model-selection from the graph, then fetch that url and look for the marker
-```
-
-`<port>` is the port your DSH Web GUI listens on. If the package's `rev` in the graph has changed, and the fetched bundle contains `LOCAL-PATCH:provider-label`,
-then what the server sends out is the patched code (this is also the acceptance path this patch was verified through).
+1.0 edited
+`<dsh-install>/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js`
+in place, inserting five anchored changes marked `LOCAL-PATCH:provider-label`.
+Every `dsh` upgrade overwrote them, and the anchors drifted. `patch.mjs` is
+still in the repository for reference; it is not part of the published files and
+must not be run against 0.2.1.
 
 ## 6. Known limitations
 
-- **Only the display of the "currently selected model" is changed.** The expanded model list is still "group title + bare model name",
-  and the `/model` command popup is the same — they already carry the provider information, it is just not in a prominent place. If you also want every row to carry its own provider,
-  you have to patch the list row as well (the `ModelSelect_module_css_default.modelName` spot).
-- The patch is applied to the **compiled artifact**, which means "editing node_modules". The reason the other two approaches were not taken:
-  - *Changing the model display name in the configuration* (writing `name` as "provider · model name" in `cordis.patch.yml`):
-    zero code and it survives upgrades, but the list would then show the provider both in the group title and inside the model name, which is redundant and ugly.
-  - *Writing a local client plugin that takes over the `conversation.input.model` slot*: the most legitimate option, but that slot is `single` and
-    `replaceRisk: shadows-shipped-ui`, so taking it over means reimplementing the entire selector (catalog loading, search, keyboard navigation,
-    effort panel), a cost out of proportion to the benefit.
+- Only the current selection (the button and the menu's "Model" value) is
+  changed. The expanded list and the `/model` command popup keep their bare
+  model names; they already show the provider in their group titles.
+- The accessibility text (aria) keeps the default model name.
 
 ## License
 
-This project is released under the MIT License. See [LICENSE](LICENSE) for details.
+This project is released under the MIT License. See [LICENSE](LICENSE) for
+details.
