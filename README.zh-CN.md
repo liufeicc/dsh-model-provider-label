@@ -2,121 +2,83 @@
 
 # dsh-model-provider-label —— 让「当前模型」按钮显示供应商
 
-> ## ⚠️ 2.0（2026-10-21）：已从「补丁」改为「slot 插件」
->
-> DSH 0.2.1 开放了官方扩展点 `conversation.input.model.label`（模型标签的渲染 slot，
-> fallback 只渲染 `model.name`）。本包据此重写：
->
-> | | 1.0（旧） | 2.0（现在） |
-> |---|---|---|
-> | 实现 | `patch.mjs` 改 `dsh-client-ui-model-selection/lib/client.js` | `client.js` 注册 slot |
-> | 升级后 | **必丢**，且锚点会随版本漂移（0.2.1 实测已失效） | 不受影响 |
-> | 覆盖 | 按钮 + 菜单 + aria | 按钮 + 菜单（aria 保持默认） |
->
-> **`patch.mjs` 已弃用**，仅作历史参考保留；不要再运行它 —— 它在 0.2.1 上会因锚点
-> 匹配不到而报错。下面「一、解决什么问题」之后的内容仍准确，只是实现方式变了，
-> 阅读时把「补丁」替换成「slot 插件」即可。
+> **2.0（2026-10-21）：已改为 slot 插件。** DSH 0.2.1 开放了
+> `conversation.input.model.label` 渲染 slot，本包现在注册一个渲染器，
+> 不再修改编译后的 `dsh-client-ui-model-selection` bundle。旧的 `patch.mjs`
+> 已弃用，仅作历史参考保留——不要在 0.2.1 上运行它，锚点已经匹配不到。
 
 ## 一、解决什么问题
 
-DSH 的模型选择器**已经**按供应商分组：展开列表后，每组上方都有供应商名（`MenuGroup` 的组标题，取的是 provider 的 `displayName`）。
-但**选中之后**，输入框上方那颗按钮只显示模型名：
+DSH 的模型选择器**已经**按供应商分组：展开列表后，每组上方都有供应商名
+（`MenuGroup` 的组标题，取的是 provider 的显示名）。但**选中之后**，输入框
+上方那颗按钮只显示模型名：
 
-```
+```text
 deepseek-v4.1-flash           ← 看不出是「阿里云(公司)」还是「阿里云(个人)」
 ```
 
-当多个供应商提供**同名模型**时（例如某个 profile 里 `阿里云(公司)` 和 `阿里云(个人)` 都是 `deepseek-v4.1-flash`，
-`llm-deepseek` 和 `和仁平台` 都是 `deepseek-flash`），组标题再清楚也没用——**选中之后它就消失了**。
+当多个供应商提供**同名模型**时（例如 `阿里云(公司)` 和 `阿里云(个人)` 都有
+`deepseek-v4.1-flash`，`llm-deepseek` 和 `和仁平台` 都有 `deepseek-flash`），
+选中之后组标题就消失了，帮不上忙。
 
-打上本补丁后：
+装上本插件后：
 
-```
+```text
 和仁平台 · deepseek-flash · Default
 └─ 淡色 ─┘   └─ 正常色 ─┘   └─ effort ┘
 ```
 
-菜单根面板里「模型」那一行的值、以及无障碍朗读文案（aria）也同步带上供应商。
+菜单根面板里「模型」那一行的值也会带上供应商。
 
-## 二、改了什么
+## 二、实现方式
 
-目标文件是 dsh 实际加载的编译产物（不是源码仓库）：
+插件为官方渲染 slot `conversation.input.model.label` 注册渲染器：
 
-```
-<dsh 安装目录>/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-# 例如全局 npm 安装时：$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js
-```
+- `client.js` —— 通过 `ctx.slots.inject(...)` 注册渲染器，只在声明该 slot 的插件
+  （`@deepseek-ai/dsh-client-ui-model-selection`）挂载期间生效，本插件卸载时自动回卷。
+- `index.js` —— 空的 Host 入口。profile 的 bundle 行是 Host 插件行，包必须能作为
+  Cordis 插件插入一次；真正的工作全部在浏览器端。
+- `cordis.patch.yml` —— 插入这条 Host 行。
+- `package.json` —— 声明 `dsh.bundle`，并通过 `dsh.client.inject` 依赖
+  model-selection 客户端包，保证声明 slot 的一方先加载。
 
-在你自己机器上解析出来的绝对路径可以用 `readlink -f ~/.dsh/profiles/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js` 查看。
+渲染器把供应商名用更淡的 caption 色放在模型名**之前**。因为供应商在前，文案被
+省略号截断时先丢的是模型名尾部，供应商不会被吃掉。展开列表里的行
+（`placement: "option"`）保持纯模型名：那个列表本来已按供应商分组，再重复一遍
+只会增加噪音。
 
-一共 5 处改动，全部锚定在唯一可识别的代码片段上：
+## 三、安装
 
-| # | 位置 | 改动 |
-|---|---|---|
-| 1 | `triggerLabel` 之前 | 新增 `providerLabel`（当前选中项所属供应商的显示名，`deepseek-account` 走本地化文案，与列表组标题保持一致）与 `modelAriaLabel` |
-| 2 | `triggerLabel` | 由「模型名 · 推理等级」改为「供应商 · 模型名 · 推理等级」，缺失部分自动跳过 |
-| 3 | 按钮文案 JSX | 供应商单独一段、用 `--dsw-alias-label-caption`（更淡）并**排在模型名之前**，被省略号截断时先丢模型名尾部，供应商不会被吃掉 |
-| 4 | 菜单根面板「模型」行的值 | 同步显示供应商 |
-| 5 | `triggerAria` | aria 朗读文案带上供应商 |
+需要 DSH 0.2.1 或更新版本（slot 从 0.2.1 起提供）。
 
-补丁文本里带 `LOCAL-PATCH:provider-label` 标记，脚本靠它判断幂等。
-
-## 三、怎么用
-
-```bash
-cd dsh-model-provider-label   # 含 patch.mjs 的目录
-
-node patch.mjs            # 打补丁（已打过会跳过）；自动从 profile 定位目标文件
-node patch.mjs --check    # 只看状态
-node patch.mjs --revert   # 撤销（与打补丁严格互逆，不依赖备份文件）
-node patch.mjs --target /别的/路径/lib/client.js   # 指定其它安装位置
+```sh
+dsh plugin --profile web add github:liufeicc/dsh-model-provider-label
 ```
 
-- 打补丁前会留一份原始副本 `client.js.orig-provider-label`（文件名不以 `.js` 结尾，
-  不会被客户端的 chunk 扫描规则 `^client\.[A-Za-z0-9][A-Za-z0-9._-]*\.js$` 命中）。
-- 改完**不需要重启**：`dsh-client-hmr` 每 500ms stat 轮询一次客户端 bundle，
-  mtime/ctime/size 变了就重算 rev 并通过 SSE 推给浏览器热加载。刷新一次页面最稳妥。
+装完重启宿主（`dsh web`）。本地开发可以直接链接目录：
 
-## 四、dsh 升级之后
-
-`dsh` 升级会覆盖 `node_modules`，补丁随之丢失（回到「只有模型名」）。重新跑一次：
-
-```bash
-node patch.mjs
+```sh
+dsh plugin --profile web add link:/path/to/dsh-model-provider-label
 ```
 
-如果升级同时改写了这段代码，脚本会**报错退出而不是瞎改**，例如：
+## 四、DSH 升级之后
 
-```
-锚点「triggerLabel 定义」匹配到 0 处，期望恰好 1 处；DSH 可能已升级并改写了这段代码，请重新核对补丁
-```
+本插件不修改 `node_modules` 下的任何文件，升级 `dsh` 不会把它弄丢。只有将来
+slot API 本身变了，才需要更新 `client.js`。
 
-这时需要照着新版 `client.js` 重新核对锚点，再更新本脚本里的常量。可以先 `node patch.mjs --check` 确认状态。
+## 五、历史：1.0 的补丁
 
-## 五、怎么验证补丁真的生效
-
-除了肉眼看按钮，还可以直接问服务器要它实际发出去的 bundle
-（`/plugins/events` 这个 SSE 端点不需要鉴权，会推送完整的客户端模块图谱）：
-
-```bash
-timeout 4 curl -s -N http://127.0.0.1:<端口>/plugins/events > /tmp/sse.txt
-# 从图谱里取出 model-selection 的 rev 与 url，再抓这个 url 查标记
-```
-
-`<端口>` 就是你的 DSH Web GUI 监听的端口。图谱里该包的 `rev` 变过、且抓下来的 bundle 里能搜到 `LOCAL-PATCH:provider-label`，
-就说明服务器发出去的就是打补丁后的代码（这也是本补丁验收时走过的路径）。
+1.0 直接修改
+`<dsh 安装目录>/node_modules/@deepseek-ai/dsh-client-ui-model-selection/lib/client.js`，
+插入 5 处带 `LOCAL-PATCH:provider-label` 标记的改动。每次升级 `dsh` 都会覆盖掉，
+锚点也会漂移。`patch.mjs` 仍留在仓库里供参考；它不在发布文件中，且不要在
+0.2.1 上运行。
 
 ## 六、已知限制
 
-- **只改了「当前选中模型」的显示**。展开后的模型列表仍然是「分组标题 + 纯模型名」，
-  `/model` 命令弹窗同理——它们本来就有供应商信息，只是位置不显眼。若也要让每一行自带供应商，
-  得再改列表行（`ModelSelect_module_css_default.modelName` 那一处）。
-- 补丁打在**编译产物**上，属于「改 node_modules」。之所以没走另外两条路：
-  - *改配置里的模型显示名*（`cordis.patch.yml` 里把 `name` 写成「供应商 · 模型名」）：
-    零代码、升级不丢，但列表里会同时出现组标题和模型名里的供应商，重复难看。
-  - *写本地客户端插件接管 `conversation.input.model` 槽位*：最正规，但该槽位是 `single` 且
-    `replaceRisk: shadows-shipped-ui`，接管等于把整个选择器（目录加载、搜索、键盘导航、
-    推理等级面板）复刻一遍，代价与收益不成比例。
+- 只改「当前选中」的显示（按钮与菜单里的「模型」值）。展开的模型列表和
+  `/model` 命令弹窗保持纯模型名——它们的组标题里已经有供应商。
+- 无障碍朗读文案（aria）保持默认模型名。
 
 ## 许可证
 
